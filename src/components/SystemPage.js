@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../firebase/config';
+import API_BASE from '../config/api';
 import './SystemPage.css';
 
 // ----------  utility  ----------
@@ -71,9 +72,9 @@ const SystemPage = ({ systemName }) => {
       title: 'Ayurveda',
       description: 'Ancient Indian system of natural and holistic healing',
       image: '/img5.png',
-      searchEp: 'https://ayushbandan.duckdns.org/terminologies/ayurveda/search/?q=',
-      csvEp: 'https://ayushbandan.duckdns.org/terminologies/ayurveda/csv/upload/',
-      autoEp: 'https://ayushbandan.duckdns.org/terminologies/ayurveda/autocomplete/?q=',
+      searchEp: `${API_BASE}/terminologies/ayurveda/search/?q=`,
+      csvEp: `${API_BASE}/terminologies/ayurveda/csv/upload/`,
+      autoEp: `${API_BASE}/terminologies/ayurveda/autocomplete/?q=`,
       about: `Ayurveda, the "science of life", is a 5,000-year-old healing tradition...`,
       benefits: [
         'Truly personalised medicine based on your unique mind-body type',
@@ -85,9 +86,9 @@ const SystemPage = ({ systemName }) => {
       title: 'Siddha',
       description: 'One of the oldest traditional medicine systems from South India',
       image: '/img3.png',
-      searchEp: 'https://ayushbandan.duckdns.org/terminologies/siddha/search/?q=',
-      csvEp: 'https://ayushbandan.duckdns.org/terminologies/siddha/csv/upload/',
-      autoEp: 'https://ayushbandan.duckdns.org/terminologies/siddha/autocomplete/?q=',
+      searchEp: `${API_BASE}/terminologies/siddha/search/?q=`,
+      csvEp: `${API_BASE}/terminologies/siddha/csv/upload/`,
+      autoEp: `${API_BASE}/terminologies/siddha/autocomplete/?q=`,
       about: `Siddha is a Tamil healing tradition believed to have been transmitted by the 18 Siddhars...`,
       benefits: [
         'Unique Naadi-pariksha (pulse diagnosis) reveals deep imbalances early',
@@ -99,9 +100,9 @@ const SystemPage = ({ systemName }) => {
       title: 'Unani',
       description: 'Greco-Arabic system of medicine based on the teachings of Hippocrates',
       image: '/img3.png',
-      searchEp: 'https://ayushbandan.duckdns.org/terminologies/unani/search/?q=',
-      csvEp: 'https://ayushbandan.duckdns.org/terminologies/unani/csv/upload/',
-      autoEp: 'https://ayushbandan.duckdns.org/terminologies/unani/autocomplete/?q=',
+      searchEp: `${API_BASE}/terminologies/unani/search/?q=`,
+      csvEp: `${API_BASE}/terminologies/unani/csv/upload/`,
+      autoEp: `${API_BASE}/terminologies/unani/autocomplete/?q=`,
       about: `Unani-Tibb is an elegant fusion of Greek, Arabic, Persian and Indian medical wisdom...`,
       benefits: [
         'Temperament-based prescriptions – right drug for the right person',
@@ -113,9 +114,9 @@ const SystemPage = ({ systemName }) => {
       title: 'ICD-11',
       description: 'International Classification of Diseases 11th Revision',
       image: '/img4.png',
-      searchEp: 'https://ayushbandan.duckdns.org/terminologies/icd11/search/?fuzzy=true&q=',
+      searchEp: `${API_BASE}/terminologies/icd11/search/?fuzzy=true&q=`,
       csvEp: null,
-      autoEp: 'https://ayushbandan.duckdns.org/terminologies/icd11/autocomplete/?q=',
+      autoEp: `${API_BASE}/terminologies/icd11/autocomplete/?q=`,
       about: `ICD-11 is the global standard for recording, analysing and reporting health conditions...`,
       benefits: [
         'Global language for disease documentation and tele-medicine',
@@ -127,7 +128,7 @@ const SystemPage = ({ systemName }) => {
       title: 'Mappings',
       description: 'Cross-links between AYUSH systems and ICD-11 codes',
       image: '/img6.png',
-      searchEp: 'https://ayushbandan.duckdns.org/terminologies/mappings/?system=',
+      searchEp: `${API_BASE}/terminologies/mappings/?system=`,
       csvEp: null,
       autoEp: null,
       about: `Mappings help connect Ayurveda, Siddha, Unani and ICD-11 terms for unified healthcare data exchange...`,
@@ -305,8 +306,18 @@ const SystemPage = ({ systemName }) => {
     });
   };
 
+  // Define allowed headers for ICD-11 - ADDED display_name
+  const allowedIcd11Headers = ['code', 'title', 'display_name', 'definition', 'class_kind'];
+
   const getTableHeaders = (items) => {
     if (!items || !items.length) return [];
+    
+    // For ICD-11, return only allowed headers
+    if (systemName === 'icd11') {
+      return allowedIcd11Headers;
+    }
+    
+    // For other systems, return all headers
     const keys = new Set();
     items.forEach((item) => Object.keys(item).forEach((k) => keys.add(k)));
     return Array.from(keys);

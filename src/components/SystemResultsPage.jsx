@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import './SystemResultsPage.css';
 
-const API_BASE = 'https://ayushbandan.duckdns.org';
+const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
 
 /* ---------- tiny helper ---------- */
 const fetchJSON = async (url) => {

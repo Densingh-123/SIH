@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
+import API_BASE from '../config/api';
 import './SearchPage.css';
 
 // API fetch utility function
@@ -35,7 +36,7 @@ const SearchPage = () => {
   const navigate = useNavigate();
   const searchInputRef = useRef(null);
   const suggestionsRef = useRef(null);
-  const API_BASE_URL = "https://ayushbandan.duckdns.org";
+  const API_BASE_URL = API_BASE;
 
   // Search strategy state
   const [searchStrategy, setSearchStrategy] = useState({
@@ -730,6 +731,63 @@ const SearchPage = () => {
                       </div>
                     </div>
                   )}
+                  {/* Add Individual System Results Here */}
+                  {['ayurveda', 'siddha', 'unani', 'icd11'].map(system => {
+                    const systemData = results[system]?.results;
+                    if (!systemData || systemData.length === 0) return null;
+                    
+                    const systemName = system === 'icd11' ? 'ICD-11' : system.charAt(0).toUpperCase() + system.slice(1);
+                    return (
+                      <div key={system} className="system-results-section" style={{ marginTop: '2rem' }}>
+                        <div className="section-header">
+                          <h3>{systemName} Direct Results ({results[system].count || systemData.length})</h3>
+                          {loadingProgress[system] && (
+                            <div className="section-loading">
+                              <div className="spinner-small"></div>
+                              <span>Loading...</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="table-container">
+                          <table className="results-table">
+                            <thead>
+                              <tr>
+                                <th>Code</th>
+                                <th>Name</th>
+                                {system !== 'icd11' && <th>Local Name</th>}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {systemData.slice(0, 5).map((item, idx) => (
+                                <tr key={item.id || item.code || idx} className="result-row">
+                                  <td><div className="term-code">{item.code}</div></td>
+                                  <td><div className="term-name">{item.english_name || item.title}</div></td>
+                                  {system !== 'icd11' && (
+                                    <td>
+                                      <div className="term-translation">
+                                        {item.hindi_name || item.tamil_name || item.arabic_name || '-'}
+                                      </div>
+                                    </td>
+                                  )}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {systemData.length > 5 && (
+                            <div className="view-more-section">
+                              <p>Showing 5 of {results[system].count || systemData.length} results</p>
+                              <button 
+                                className="view-more-btn"
+                                onClick={() => navigate(`/${system === 'icd11' ? 'icd-11' : system}`)}
+                              >
+                                View all in {systemName} Database
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : hasSearched && !isSearching ? (
                 <div className="no-results-message">

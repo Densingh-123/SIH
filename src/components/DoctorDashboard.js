@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
+import API_BASE from '../config/api';
 import './DoctorDashboard.css';
 
 const DoctorDashboard = () => {
@@ -43,7 +44,7 @@ const DoctorDashboard = () => {
         setPatients(patientsData);
 
         // Fetch mappings stats from the endpoint
-        const mappingsResponse = await fetch('https://ayushbandan.duckdns.org/terminologies/mappings/stats/');
+        const mappingsResponse = await fetch(`${API_BASE}/terminologies/mappings/stats/`);
         if (mappingsResponse.ok) {
           const mappingsStats = await mappingsResponse.json();
           setMappingsData(mappingsStats);

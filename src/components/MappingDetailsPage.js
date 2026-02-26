@@ -1,50 +1,86 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import API_BASE from '../config/api';
 import "./MappingDetailsPage.css";
 
-const fetchData = async (url) => {
+// Cache for API responses to avoid redundant calls
+const apiCache = new Map();
+
+const fetchData = async (url, useCache = true) => {
+  // Check cache first
+  if (useCache && apiCache.has(url)) {
+    return apiCache.get(url);
+  }
+
   try {
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    return await response.json();
+    const data = await response.json();
+    
+    // Cache the response
+    if (useCache) {
+      apiCache.set(url, data);
+    }
+    
+    return data;
   } catch (error) {
     console.error("Error fetching data:", error);
     return null;
   }
 };
 
-// Optimized function to fetch paginated data with better error handling
-const fetchAllPaginatedData = async (baseUrl, searchTerm, system = null) => {
-  let allResults = [];
-  let nextUrl = null;
+// Optimized function to fetch data with pagination support
+const fetchPaginatedData = async (baseUrl, searchTerm, system = null, page = 1, pageSize = 10) => {
+  let url = null;
 
   // Construct URL based on system type with optimized parameters
   if (system === 'combined') {
-    nextUrl = `${baseUrl}/terminologies/search/combined/?q=${encodeURIComponent(searchTerm)}&fuzzy=true&threshold=0.2&use_fts=true`;
+    url = `${baseUrl}/terminologies/search/combined/?q=${encodeURIComponent(searchTerm)}&fuzzy=true&threshold=0.2&use_fts=true&page=${page}&page_size=${pageSize}`;
   } else if (system === 'icd11') {
-    nextUrl = `${baseUrl}/terminologies/icd11/search/?q=${encodeURIComponent(searchTerm)}&fuzzy=true&threshold=0.2`;
+    url = `${baseUrl}/terminologies/icd11/search/?q=${encodeURIComponent(searchTerm)}&fuzzy=true&threshold=0.2&page=${page}&page_size=${pageSize}`;
   } else if (system) {
-    nextUrl = `${baseUrl}/terminologies/${system}/search/?q=${encodeURIComponent(searchTerm)}&threshold=0.1`;
+    url = `${baseUrl}/terminologies/${system}/search/?q=${encodeURIComponent(searchTerm)}&threshold=0.2&page=${page}&page_size=${pageSize}`;
   }
 
-  if (!nextUrl) return { results: [], count: 0 };
+  if (!url) return { results: [], count: 0, next: null, previous: null };
 
   try {
-    while (nextUrl) {
-      const data = await fetchData(nextUrl);
-      if (data && data.results) {
-        allResults = [...allResults, ...data.results];
-        nextUrl = data.next || data.pagination?.next || null;
-      } else {
-        break;
-      }
+    const data = await fetchData(url);
+    if (data) {
+      return {
+        results: data.results || [],
+        count: data.count || 0,
+        next: data.next,
+        previous: data.previous
+      };
     }
-    return { results: allResults, count: allResults.length };
+    return { results: [], count: 0, next: null, previous: null };
   } catch (error) {
     console.error(`Error fetching ${system} data:`, error);
-    return { results: [], count: 0 };
+    return { results: [], count: 0, next: null, previous: null };
   }
+};
+
+// Function to fetch all pages for a system (for detailed view)
+const fetchAllPagesForSystem = async (baseUrl, searchTerm, system, maxPages = 3) => {
+  let allResults = [];
+  let page = 1;
+  let hasMore = true;
+  const pageSize = 50; // Larger page size for detailed view
+
+  while (hasMore && page <= maxPages) {
+    const data = await fetchPaginatedData(baseUrl, searchTerm, system, page, pageSize);
+    if (data.results && data.results.length > 0) {
+      allResults = [...allResults, ...data.results];
+      hasMore = !!data.next;
+      page++;
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return { results: allResults, count: allResults.length };
 };
 
 const MappingDetailsPage = () => {
@@ -53,12 +89,13 @@ const MappingDetailsPage = () => {
   const { mapping, searchParams, additionalData, searchTerm, item, system, source, systemType } = location.state || {};
   const [activeTab, setActiveTab] = useState("overview");
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [allData, setAllData] = useState({
-    combined: { results: [], count: 0 },
-    ayurveda: { results: [], count: 0 },
-    unani: { results: [], count: 0 },
-    siddha: { results: [], count: 0 },
-    icd11: { results: [], count: 0 }
+    combined: { results: [], count: 0, next: null, currentPage: 1 },
+    ayurveda: { results: [], count: 0, next: null, currentPage: 1 },
+    unani: { results: [], count: 0, next: null, currentPage: 1 },
+    siddha: { results: [], count: 0, next: null, currentPage: 1 },
+    icd11: { results: [], count: 0, next: null, currentPage: 1 }
   });
   const [selectedResult, setSelectedResult] = useState(null);
   const [detailedData, setDetailedData] = useState(null);
@@ -73,7 +110,8 @@ const MappingDetailsPage = () => {
     icd11: false
   });
 
-  const API_BASE_URL = "https://ayushbandan.duckdns.org";
+  const API_BASE_URL = API_BASE;
+  const loadedTermsRef = useRef(new Set());
 
   // Sync theme with localStorage and header
   useEffect(() => {
@@ -108,6 +146,33 @@ const MappingDetailsPage = () => {
     };
   }, []);
 
+  // Load more results for a specific system (pagination)
+  const loadMoreResults = async (systemKey) => {
+    if (!allData[systemKey]?.next || isLoadingMore) return;
+
+    setIsLoadingMore(true);
+    try {
+      const nextPage = (allData[systemKey].currentPage || 1) + 1;
+      const newData = await fetchPaginatedData(API_BASE_URL, searchTerm, systemKey === 'icd11' ? 'icd11' : systemKey, nextPage, 10);
+
+      if (newData.results) {
+        setAllData(prev => ({
+          ...prev,
+          [systemKey]: {
+            results: [...prev[systemKey].results, ...newData.results],
+            count: newData.count,
+            next: newData.next,
+            currentPage: nextPage
+          }
+        }));
+      }
+    } catch (error) {
+      console.error(`Error loading more ${systemKey} results:`, error);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
+
   // Progressive data loading - load data system by system
   useEffect(() => {
     const loadDataProgressively = async () => {
@@ -115,15 +180,18 @@ const MappingDetailsPage = () => {
 
       setIsLoading(true);
       
-      // Load combined data first (most important)
+      // Load combined data first (most important) with page=1
       setLoadingProgress(prev => ({ ...prev, combined: true }));
-      const combinedData = await fetchAllPaginatedData(API_BASE_URL, searchTerm, 'combined');
-      setAllData(prev => ({ ...prev, combined: combinedData }));
+      const combinedData = await fetchPaginatedData(API_BASE_URL, searchTerm, 'combined', 1, 10);
+      setAllData(prev => ({ ...prev, combined: { ...combinedData, currentPage: 1 } }));
       setLoadingProgress(prev => ({ ...prev, combined: false }));
+
+      let activeItem = null;
 
       // Set initial selected result as soon as we have some data
       if (combinedData.results.length > 0 && !selectedResult) {
         const firstResult = combinedData.results[0];
+        activeItem = firstResult;
         setSelectedResult({ 
           ...firstResult, 
           system: 'Combined', 
@@ -131,6 +199,7 @@ const MappingDetailsPage = () => {
           termName: firstResult.title || searchTerm
         });
       } else if (mapping && !selectedResult) {
+        activeItem = mapping;
         setSelectedResult({ 
           ...mapping, 
           system: systemType || 'Combined', 
@@ -138,6 +207,7 @@ const MappingDetailsPage = () => {
           termName: mapping.source_term?.english_name || mapping.title || searchTerm
         });
       } else if (item && !selectedResult) {
+        activeItem = item;
         setSelectedResult({
           ...item,
           system: systemType || 'System',
@@ -146,13 +216,41 @@ const MappingDetailsPage = () => {
         });
       }
 
+      if (!activeItem && selectedResult) {
+        activeItem = selectedResult;
+      }
+
       // Load other systems in parallel but update state individually
       const systems = ['ayurveda', 'unani', 'siddha', 'icd11'];
       
       systems.forEach(async (system) => {
         setLoadingProgress(prev => ({ ...prev, [system]: true }));
-        const systemData = await fetchAllPaginatedData(API_BASE_URL, searchTerm, system);
-        setAllData(prev => ({ ...prev, [system]: systemData }));
+        const systemData = await fetchPaginatedData(API_BASE_URL, searchTerm, system, 1, 10);
+        
+        // If direct search yields no results for traditional medicine, try to use mapping data
+        if (systemData.results.length === 0 && system !== 'icd11') {
+          let mappedTerm = null;
+          if (activeItem) {
+            if (activeItem[`related_${system}`]) {
+              mappedTerm = activeItem[`related_${system}`];
+            } else if (activeItem.namaste_terms && activeItem.namaste_terms[system]) {
+              mappedTerm = activeItem.namaste_terms[system];
+            }
+          }
+          if (mappedTerm) {
+            // Ensure the mapped term has an id for rendering keys
+            systemData.results = [{...mappedTerm, id: mappedTerm.id || Math.random().toString()}];
+            systemData.count = 1;
+          }
+        }
+        
+        setAllData(prev => ({ 
+          ...prev, 
+          [system]: { 
+            ...systemData, 
+            currentPage: 1 
+          } 
+        }));
         setLoadingProgress(prev => ({ ...prev, [system]: false }));
       });
 
@@ -181,7 +279,7 @@ const MappingDetailsPage = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const renderPagination = (data) => {
+  const renderPagination = (data, systemKey) => {
     const totalPages = getTotalPages(data);
     if (totalPages <= 1) return null;
 
@@ -254,6 +352,16 @@ const MappingDetailsPage = () => {
         <span className="pagination-info">
           Page {currentPage} of {totalPages} ({data.results.length} total items)
         </span>
+        
+        {data.next && currentPage === Math.ceil(data.results.length / itemsPerPage) && (
+          <button 
+            className="pagination-btn load-more-btn"
+            onClick={() => loadMoreResults(systemKey)}
+            disabled={isLoadingMore}
+          >
+            {isLoadingMore ? 'Loading...' : 'Load More'}
+          </button>
+        )}
       </div>
     );
   };
@@ -263,18 +371,21 @@ const MappingDetailsPage = () => {
     setCurrentPage(1);
   }, [activeTab]);
 
-  // Fetch detailed data for a specific term
-  const fetchDetailedData = async (termName) => {
-    if (!termName) return;
+  // Fetch detailed data for a specific term - optimized with caching and pagination
+  const fetchDetailedData = useCallback(async (termName) => {
+    if (!termName || loadedTermsRef.current.has(termName)) return;
     
     setIsLoading(true);
+    loadedTermsRef.current.add(termName);
+    
     try {
+      // Fetch first page of each system quickly
       const [combinedDetail, ayurvedaDetail, unaniDetail, siddhaDetail, icd11Detail] = await Promise.all([
-        fetchAllPaginatedData(API_BASE_URL, termName, 'combined'),
-        fetchAllPaginatedData(API_BASE_URL, termName, 'ayurveda'),
-        fetchAllPaginatedData(API_BASE_URL, termName, 'unani'),
-        fetchAllPaginatedData(API_BASE_URL, termName, 'siddha'),
-        fetchAllPaginatedData(API_BASE_URL, termName, 'icd11')
+        fetchPaginatedData(API_BASE_URL, termName, 'combined', 1, 10),
+        fetchPaginatedData(API_BASE_URL, termName, 'ayurveda', 1, 10),
+        fetchPaginatedData(API_BASE_URL, termName, 'unani', 1, 10),
+        fetchPaginatedData(API_BASE_URL, termName, 'siddha', 1, 10),
+        fetchPaginatedData(API_BASE_URL, termName, 'icd11', 1, 10)
       ]);
 
       setDetailedData({
@@ -284,12 +395,37 @@ const MappingDetailsPage = () => {
         siddha: siddhaDetail,
         icd11: icd11Detail
       });
+
+      // Fetch additional pages in the background for systems with more results
+      const fetchAdditionalPages = async () => {
+        const systems = [
+          { name: 'combined', data: combinedDetail },
+          { name: 'ayurveda', data: ayurvedaDetail },
+          { name: 'unani', data: unaniDetail },
+          { name: 'siddha', data: siddhaDetail },
+          { name: 'icd11', data: icd11Detail }
+        ];
+
+        for (const system of systems) {
+          if (system.data.next) {
+            const allData = await fetchAllPagesForSystem(API_BASE_URL, termName, system.name);
+            setDetailedData(prev => ({
+              ...prev,
+              [system.name]: { ...prev[system.name], ...allData }
+            }));
+          }
+        }
+      };
+
+      // Don't await this - let it run in background
+      fetchAdditionalPages();
+      
     } catch (error) {
       console.error("Error fetching detailed data:", error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [API_BASE_URL]);
 
   const handleResultClick = async (result, systemName, type = 'system') => {
     const termName = result.english_name || result.title || result.name || result.source_term?.english_name;
@@ -304,15 +440,14 @@ const MappingDetailsPage = () => {
     setSelectedResult(newSelectedResult);
     setActiveTab('detailed-view');
     
-    // Only fetch detailed data if we don't have it already
-    if (!detailedData || Object.values(detailedData).every(data => !data.results.length)) {
-      await fetchDetailedData(termName);
-    }
+    // Fetch detailed data
+    await fetchDetailedData(termName);
   };
 
   // Helper function to render system results with loading states
   const renderSystemResults = (systemData, systemName) => {
     const isCurrentlyLoading = loadingProgress[systemName.toLowerCase()];
+    const systemKey = systemName.toLowerCase();
 
     if (isCurrentlyLoading) {
       return (
@@ -407,7 +542,7 @@ const MappingDetailsPage = () => {
               ))}
             </tbody>
           </table>
-          {renderPagination(systemData)}
+          {renderPagination(systemData, systemKey)}
         </div>
       </div>
     );
@@ -510,7 +645,7 @@ const MappingDetailsPage = () => {
             </button>
           </div>
         ))}
-        {renderPagination(allData.combined)}
+        {renderPagination(allData.combined, 'combined')}
       </div>
     );
   };
@@ -552,12 +687,28 @@ const MappingDetailsPage = () => {
     const result = selectedResult;
     const termName = result.termName || result.english_name || result.title || result.name || result.source_term?.english_name;
     
-    // Get best matches from detailed data or fall back to allData
+    // Get best matches from detailed data or fall back to allData or mapping data
     const getMatchData = (system) => {
+      // 1. If we have mapping data passed directly in the selectedResult, use it!
+      if (system !== 'combined' && system !== 'icd11') {
+        const sysKey = system.toLowerCase();
+        
+        // If it came from the SearchPage mappingResults table:
+        if (result.type === 'mapping' && result.namaste_terms && result.namaste_terms[sysKey]) {
+          return result.namaste_terms[sysKey];
+        }
+        
+        // If it came from the Combined tab inside MappingDetailsPage:
+        if (result[`related_${sysKey}`]) {
+          return result[`related_${sysKey}`];
+        }
+      }
+
+      // 2. Otherwise try detailedData (which now contains all pages)
       if (detailedData && detailedData[system]?.results?.length) {
         return findBestMatch(detailedData[system], termName);
       }
-      // Fall back to initial search data
+      // 3. Fall back to initial search data
       return findBestMatch(allData[system], termName);
     };
 
