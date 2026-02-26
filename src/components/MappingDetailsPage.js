@@ -739,7 +739,6 @@ const MappingDetailsPage = () => {
             </div>
           </div>
         </div>
-
         <div className="detail-content">
           {/* ICD-11/Combined Details */}
           <div className="detail-section">
