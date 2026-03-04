@@ -24,7 +24,7 @@ const Header = ({ theme, toggleTheme, user, handleSignIn, handleSignOut }) => {
             <li><Link to="/search">Search</Link></li>
             <li><Link to="/medi-assist">Medi Assist</Link></li>
             <li>
-              <a href="https://ayush-documentation.vercel.app"
+              <a href="https://medbridge-documentation.vercel.app/"
                  target="_blank" rel="noopener noreferrer">Documentation</a>
             </li>
 
