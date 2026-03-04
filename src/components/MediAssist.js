@@ -1,15 +1,46 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { motion, AnimatePresence } from 'framer-motion';
+import API_BASE from '../config/api';
 
-const API_KEY = 'AIzaSyBMUF3JoFjaYzd59fMjQQeIL5Xgmu0772g';
+const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
 function MediAssist({ theme }) {
   const [query, setQuery] = useState('');
   const [result, setResult] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [systemResults, setSystemResults] = useState({
+    ayurveda: null,
+    siddha: null,
+    unani: null,
+    icd11: null
+  });
+  const [activeSystemTab, setActiveSystemTab] = useState(null);
 
   const isDarkMode = theme === 'dark';
+
+  const fetchSystem = async (system, searchTerm) => {
+    let endpoint = '';
+    if (system === 'icd11') {
+      endpoint = `${API_BASE}/terminologies/icd11/search/?fuzzy=true&q=${encodeURIComponent(searchTerm)}`;
+    } else {
+      endpoint = `${API_BASE}/terminologies/${system}/search/?q=${encodeURIComponent(searchTerm)}`;
+    }
+    
+    try {
+      const res = await fetch(endpoint);
+      if(!res.ok) return [];
+      const data = await res.json();
+      console.log(`[${system}] Data:`, data); // Debug logging
+      if(data && data.results) return Array.isArray(data.results) ? data.results : [];
+      if(Array.isArray(data)) return data;
+      return [];
+    } catch(e) {
+      console.error(`Error fetching ${system}:`, e);
+      return [];
+    }
+  };
 
   const handleSearch = async (e) => {
     e.preventDefault();
@@ -18,6 +49,8 @@ function MediAssist({ theme }) {
     setLoading(true);
     setError('');
     setResult('');
+    setSystemResults({ ayurveda: null, siddha: null, unani: null, icd11: null });
+    setActiveSystemTab(null);
 
     const systemPrompt = `You are a fast, highly concise medical AI. 
 Provide extremely concise, practical medical information about the given disease, symptom, or medicine.
@@ -31,41 +64,59 @@ RULES:
 5. If it's not a health/medical topic, respond with a single sentence declining the query in a polite way.`;
 
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [{ text: systemPrompt }],
-              },
-            ],
-            generationConfig: {
-              maxOutputTokens: 600,
-              temperature: 0.2,
-            }
-          }),
+      // Parallel fetch for Gemini AI + Local System Endpoints
+      const fetchAI = async () => {
+        if (!API_KEY) {
+          return { ok: false, json: async () => ({}) };
         }
-      );
+        try {
+          return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: systemPrompt }] }],
+              generationConfig: { maxOutputTokens: 600, temperature: 0.2 }
+            })
+          });
+        } catch (e) {
+          return { ok: false, json: async () => ({}) };
+        }
+      };
 
-      if (!response.ok) {
-        throw new Error('Failed to fetch response');
-      }
+      const [aiResponse, ayuData, sidData, unaData, icdData] = await Promise.all([
+        fetchAI(),
+        fetchSystem('ayurveda', query),
+        fetchSystem('siddha', query),
+        fetchSystem('unani', query),
+        fetchSystem('icd11', query)
+      ]);
 
-      const data = await response.json();
+      // Handle Component State
+      setSystemResults({
+        ayurveda: ayuData,
+        siddha: sidData,
+        unani: unaData,
+        icd11: icdData
+      });
 
-      if (data.candidates && data.candidates.length > 0) {
-        setResult(data.candidates[0].content.parts[0].text);
+      // Handle AI Res
+      if (!aiResponse.ok) {
+        console.warn('AI Response not OK, falling back to db results.');
+        setResult('Definition service unavailable at the moment. Please refer to the clinical database results below.');
       } else {
-        throw new Error('No valid response received');
+        const data = await aiResponse.json();
+        if (data.candidates && data.candidates.length > 0) {
+          setResult(data.candidates[0].content.parts[0].text);
+        } else {
+          setResult('No specific AI summarization available for this query. Please check clinical references below.');
+        }
       }
+
     } catch (err) {
-      console.error(err);
-      setError('An error occurred while fetching the response. Please try again.');
+      console.error("Critical search error:", err);
+      // Even if AI completely fails, we still want to show the results we got so far visually, so don't clear them completely, just set error text
+      setError('An error occurred while fetching the response. Showing partial data if available.');
+      if (!result) setResult('AI search failed.');
     } finally {
       setLoading(false);
     }
@@ -74,10 +125,12 @@ RULES:
   const themeStyles = {
     cardBg: isDarkMode ? 'rgba(20, 20, 20, 0.4)' : 'rgba(255, 255, 255, 0.6)',
     glassBorder: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
-    inputBg: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.02)',
+    inputBg: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(240, 244, 248, 0.7)',
     textMuted: isDarkMode ? '#94a3b8' : '#475569',
     textMain: isDarkMode ? '#f8fafc' : '#0f172a',
     primaryColor: '#357abd',
+    resultBoxBg: isDarkMode ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.7)',
+    resultBoxHover: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)',
   };
 
   return (
@@ -108,6 +161,12 @@ RULES:
         .markdown-wrapper h3, .markdown-wrapper h2 { color: ${themeStyles.primaryColor}; margin-top: 1.5rem; margin-bottom: 0.8rem; border-bottom: 1px solid ${themeStyles.glassBorder}; padding-bottom: 0.5rem; }
         .markdown-wrapper h3:first-child, .markdown-wrapper h2:first-child { margin-top: 0; }
         .markdown-wrapper strong { font-weight: 600; color: ${themeStyles.textMain}; opacity: 0.9; }
+        
+        /* Custom Scrollbar */
+        .custom-scroll::-webkit-scrollbar { width: 6px; }
+        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: rgba(100,100,100,0.3); border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(100,100,100,0.5); }
       `}</style>
 
       <div style={{
@@ -138,7 +197,7 @@ RULES:
             </svg>
             <input
               type="text"
-              placeholder="Type a disease (e.g., Cough) or medicine..."
+              placeholder="Type a disease (e.g., Fever) or medicine..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               disabled={loading}
@@ -154,7 +213,6 @@ RULES:
                 transition: 'all 0.3s ease',
                 outline: 'none',
                 boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.05)',
-                boxSizing: 'border-box'
               }}
               onFocus={(e) => {
                 e.target.style.borderColor = themeStyles.primaryColor;
@@ -187,10 +245,6 @@ RULES:
               minHeight: '60px',
               opacity: loading || !query.trim() ? 0.7 : 1
             }}
-            onMouseOver={(e) => {
-              if (!loading && query.trim()) e.target.style.transform = 'translateY(-2px)';
-            }}
-            onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
           >
             {loading ? 'Searching...' : 'Search'}
           </button>
@@ -242,11 +296,12 @@ RULES:
               animation: 'spin 0.8s linear infinite'
             }}></div>
             <p style={{ color: themeStyles.textMuted, fontWeight: 500, margin: 0, animation: 'pulse 1.5s ease-in-out infinite' }}>
-              Scanning medical knowledge base...
+              Scanning medical knowledge base & databases...
             </p>
           </div>
         )}
 
+        {/* AI Results */}
         {result && !loading && (
           <div style={{
             background: themeStyles.inputBg,
@@ -259,6 +314,138 @@ RULES:
             <div className="markdown-wrapper" style={{ lineHeight: 1.6, fontSize: '1.1rem' }}>
               <ReactMarkdown>{result}</ReactMarkdown>
             </div>
+          </div>
+        )}
+
+        {/* Clinical Reference Database Results */}
+        {result && !loading && (
+          <div style={{ marginTop: '1rem', animation: 'fadeIn 0.6s ease-out' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.2rem' }}>
+              <h3 style={{ color: themeStyles.textMain, margin: 0 }}>Clinical References</h3>
+              <div style={{ flex: 1, height: '1px', background: themeStyles.glassBorder }}></div>
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '1rem'
+            }}>
+              {Object.entries({
+                'Modern Medicine (ICD-11)': { key: 'icd11', data: systemResults.icd11 },
+                'Ayurveda': { key: 'ayurveda', data: systemResults.ayurveda },
+                'Siddha': { key: 'siddha', data: systemResults.siddha },
+                'Unani': { key: 'unani', data: systemResults.unani }
+              }).map(([title, info]) => {
+                const hasData = info.data && info.data.length > 0;
+                const isActive = activeSystemTab === info.key;
+                
+                return (
+                  <motion.div
+                    key={info.key}
+                    whileHover={hasData ? { y: -3, boxShadow: '0 8px 15px rgba(0,0,0,0.1)' } : {}}
+                    whileTap={hasData ? { scale: 0.98 } : {}}
+                    onClick={() => hasData && setActiveSystemTab(isActive ? null : info.key)}
+                    style={{
+                      background: isActive ? themeStyles.primaryColor : themeStyles.resultBoxBg,
+                      color: isActive ? 'white' : themeStyles.textMain,
+                      border: `1px solid ${isActive ? themeStyles.primaryColor : themeStyles.glassBorder}`,
+                      borderRadius: '14px',
+                      padding: '1.5rem',
+                      cursor: hasData ? 'pointer' : 'default',
+                      transition: 'background 0.3s, color 0.3s',
+                      textAlign: 'center',
+                      opacity: hasData ? 1 : 0.5,
+                      boxShadow: isActive ? `0 10px 20px rgba(53, 122, 189, 0.3)` : '0 4px 6px rgba(0,0,0,0.02)',
+                    }}
+                  >
+                    <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem' }}>{title}</h4>
+                    <p style={{ 
+                      margin: 0, 
+                      fontSize: '0.9rem', 
+                      fontWeight: isActive ? 600 : 400,
+                      opacity: isActive ? 1 : 0.8 
+                    }}>
+                      {!info.data ? 'Loading...' : hasData ? `${info.data.length} Results Found` : 'No Results'}
+                    </p>
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            {/* Expanded Tab Content */}
+            <AnimatePresence>
+              {activeSystemTab && systemResults[activeSystemTab] && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
+                  exit={{ opacity: 0, y: -10, height: 0 }}
+                  transition={{ duration: 0.3 }}
+                  style={{ overflow: 'hidden' }}
+                >
+                  <div style={{
+                    marginTop: '1.5rem',
+                    background: themeStyles.resultBoxBg,
+                    border: `1px solid ${themeStyles.glassBorder}`,
+                    borderRadius: '16px',
+                    padding: '2rem',
+                    boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                      <h4 style={{ color: themeStyles.primaryColor, margin: 0, fontSize: '1.3rem' }}>
+                        {activeSystemTab === 'icd11' ? 'ICD-11' : activeSystemTab.charAt(0).toUpperCase() + activeSystemTab.slice(1)} Database Results
+                      </h4>
+                      <button 
+                        onClick={() => setActiveSystemTab(null)}
+                        style={{
+                          background: 'none', border: 'none', color: themeStyles.textMuted, cursor: 'pointer',
+                          fontSize: '1.5rem', padding: '0 0.5rem', lineHeight: 1
+                        }}
+                      >&times;</button>
+                    </div>
+
+                    <div className="custom-scroll" style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '1rem', 
+                      maxHeight: '400px', 
+                      overflowY: 'auto',
+                      paddingRight: '1rem'
+                    }}>
+                      {systemResults[activeSystemTab].map((item, idx) => (
+                        <div key={idx} style={{ 
+                          padding: '1.5rem', 
+                          background: themeStyles.inputBg, 
+                          borderRadius: '12px',
+                          border: `1px solid ${themeStyles.glassBorder}`
+                        }}>
+                          {Object.entries(item).filter(([k, v]) => v && k !== 'id').slice(0, 6).map(([k, v]) => (
+                            <div key={k} style={{ 
+                              fontSize: '1rem', 
+                              marginBottom: '0.6rem',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.2rem'
+                            }}>
+                              <strong style={{ 
+                                color: themeStyles.primaryColor,
+                                fontSize: '0.85rem',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px'
+                              }}>
+                                {k.replace(/_/g, ' ')}
+                              </strong>
+                              <span style={{ color: themeStyles.textMain, wordBreak: 'break-word', lineHeight: 1.5 }}>
+                                {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         )}
       </div>
