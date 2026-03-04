@@ -30,15 +30,14 @@ function MediAssist({ theme }) {
     
     try {
       const res = await fetch(endpoint);
-      if(!res.ok) return [];
+      if(!res.ok) return [{ id: 'error', title: 'HTTP Error ' + res.status, description: 'Endpoint failed' }];
       const data = await res.json();
-      console.log(`[${system}] Data:`, data); // Debug logging
       if(data && data.results) return Array.isArray(data.results) ? data.results : [];
       if(Array.isArray(data)) return data;
       return [];
     } catch(e) {
       console.error(`Error fetching ${system}:`, e);
-      return [];
+      return [{ id: 'error', title: 'Fetch Error', description: e.message || 'Unknown network error' }];
     }
   };
 
