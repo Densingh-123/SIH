@@ -146,23 +146,22 @@ const MappingDetailsPage = () => {
     };
   }, []);
 
-  // Load more results for a specific system (pagination)
+  // Load more results using the stored next URL
   const loadMoreResults = async (systemKey) => {
-    if (!allData[systemKey]?.next || isLoadingMore) return;
+    const nextUrl = allData[systemKey]?.next;
+    if (!nextUrl || isLoadingMore) return;
 
     setIsLoadingMore(true);
     try {
-      const nextPage = (allData[systemKey].currentPage || 1) + 1;
-      const newData = await fetchPaginatedData(API_BASE_URL, searchTerm, systemKey === 'icd11' ? 'icd11' : systemKey, nextPage, 10);
-
-      if (newData.results) {
+      const data = await fetchData(nextUrl);
+      if (data && data.results) {
         setAllData(prev => ({
           ...prev,
           [systemKey]: {
-            results: [...prev[systemKey].results, ...newData.results],
-            count: newData.count,
-            next: newData.next,
-            currentPage: nextPage
+            results: [...prev[systemKey].results, ...data.results],
+            count: data.count || prev[systemKey].count,
+            next: data.next,
+            currentPage: (prev[systemKey].currentPage || 1) + 1
           }
         }));
       }
@@ -173,16 +172,16 @@ const MappingDetailsPage = () => {
     }
   };
 
-  // Progressive data loading - load data system by system
+  // Progressive data loading - load data system by system with page_size=50
   useEffect(() => {
     const loadDataProgressively = async () => {
       if (!searchTerm) return;
 
       setIsLoading(true);
       
-      // Load combined data first (most important) with page=1
+      // Load combined data first (most important) with page_size=50
       setLoadingProgress(prev => ({ ...prev, combined: true }));
-      const combinedData = await fetchPaginatedData(API_BASE_URL, searchTerm, 'combined', 1, 10);
+      const combinedData = await fetchPaginatedData(API_BASE_URL, searchTerm, 'combined', 1, 50);
       setAllData(prev => ({ ...prev, combined: { ...combinedData, currentPage: 1 } }));
       setLoadingProgress(prev => ({ ...prev, combined: false }));
 
@@ -220,12 +219,12 @@ const MappingDetailsPage = () => {
         activeItem = selectedResult;
       }
 
-      // Load other systems in parallel but update state individually
+      // Load other systems in parallel but update state individually, with page_size=50
       const systems = ['ayurveda', 'unani', 'siddha', 'icd11'];
       
       systems.forEach(async (system) => {
         setLoadingProgress(prev => ({ ...prev, [system]: true }));
-        const systemData = await fetchPaginatedData(API_BASE_URL, searchTerm, system, 1, 10);
+        const systemData = await fetchPaginatedData(API_BASE_URL, searchTerm, system, 1, 50);
         
         // If direct search yields no results for traditional medicine, try to use mapping data
         if (systemData.results.length === 0 && system !== 'icd11') {
@@ -739,6 +738,7 @@ const MappingDetailsPage = () => {
             </div>
           </div>
         </div>
+
         <div className="detail-content">
           {/* ICD-11/Combined Details */}
           <div className="detail-section">

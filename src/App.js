@@ -27,6 +27,7 @@ import MappingDetailsPage from './components/MappingDetailsPage';
 import Footer from './components/Footer';
 import ScrollToTop from './components/ScrollToTop'; // ✅ import
 import PatientDetail from './components/PatientDetail';
+import MediAssist from './components/MediAssist'; // Add this line
 import './styles/App.css';
 import PatientsPage from './components/PatientsPage';
 function App() {
@@ -143,6 +144,7 @@ function App() {
              <Route path="/patient/:patientId" element={<PatientDetail />} />
              <Route path="/system-results" element={<SystemResultsPage />} />
               <Route path="/patients" element={<PatientsPage />} />
+              <Route path="/medi-assist" element={<MediAssist theme={theme} />} />
             {/* ✅ Protected Routes */}
             <Route 
               path="/add-patient" 

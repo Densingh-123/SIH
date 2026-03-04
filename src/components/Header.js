@@ -22,6 +22,7 @@ const Header = ({ theme, toggleTheme, user, handleSignIn, handleSignOut }) => {
         <nav className="nav desktop-nav">
           <ul>
             <li><Link to="/search">Search</Link></li>
+            <li><Link to="/medi-assist">Medi Assist</Link></li>
             <li>
               <a href="https://ayush-documentation.vercel.app"
                  target="_blank" rel="noopener noreferrer">Documentation</a>
@@ -85,6 +86,7 @@ const Header = ({ theme, toggleTheme, user, handleSignIn, handleSignOut }) => {
 
               <ul className="drawer-list">
                 <li><Link to="/search" onClick={close}>Search</Link></li>
+                <li><Link to="/medi-assist" onClick={close}>Medi Assist</Link></li>
                 <li>
                   <a href="https://ayush-documentation.vercel.app"
                      target="_blank" rel="noopener noreferrer" onClick={close}>
