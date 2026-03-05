@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
 import API_BASE from '../config/api';
+import { db } from '../firebase/config';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY;
 
@@ -30,15 +32,14 @@ function MediAssist({ theme }) {
     
     try {
       const res = await fetch(endpoint);
-      if(!res.ok) return [];
+      if(!res.ok) return [{ id: 'error', title: 'HTTP Error ' + res.status, description: 'Endpoint failed' }];
       const data = await res.json();
-      console.log(`[${system}] Data:`, data); // Debug logging
       if(data && data.results) return Array.isArray(data.results) ? data.results : [];
       if(Array.isArray(data)) return data;
       return [];
     } catch(e) {
       console.error(`Error fetching ${system}:`, e);
-      return [];
+      return [{ id: 'error', title: 'Fetch Error', description: e.message || 'Unknown network error' }];
     }
   };
 
@@ -66,11 +67,26 @@ RULES:
     try {
       // Parallel fetch for Gemini AI + Local System Endpoints
       const fetchAI = async () => {
+        const normalizedQuery = query.toLowerCase().trim();
+        const cacheDocRef = doc(db, 'ai_cache', normalizedQuery);
+
+        try {
+          // Check Firebase Cache First
+          const cacheSnap = await getDoc(cacheDocRef);
+          if (cacheSnap.exists()) {
+            console.log("Serving AI reply from Firebase Cache:", normalizedQuery);
+            return { ok: true, isCached: true, data: cacheSnap.data().result };
+          }
+        } catch (cacheErr) {
+          console.error("Firebase cache check failed:", cacheErr);
+        }
+
         if (!API_KEY) {
           return { ok: false, json: async () => ({}) };
         }
+        
         try {
-          return await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
+          const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API_KEY}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -78,12 +94,26 @@ RULES:
               generationConfig: { maxOutputTokens: 600, temperature: 0.2 }
             })
           });
+
+          if (!aiResponse.ok) return { ok: false, json: async () => ({}) };
+          
+          const rawData = await aiResponse.json();
+          if (rawData.candidates && rawData.candidates.length > 0) {
+             const resultText = rawData.candidates[0].content.parts[0].text;
+             // Save to cache asynchronously so we don't block the UI resolving
+             setDoc(cacheDocRef, { result: resultText, timestamp: new Date() }).catch(e => console.error("Cache save err:", e));
+             
+             return { ok: true, isCached: false, data: resultText };
+          }
+          
+          return { ok: false, json: async () => ({}) };
+
         } catch (e) {
           return { ok: false, json: async () => ({}) };
         }
       };
 
-      const [aiResponse, ayuData, sidData, unaData, icdData] = await Promise.all([
+      const [aiResultObj, ayuData, sidData, unaData, icdData] = await Promise.all([
         fetchAI(),
         fetchSystem('ayurveda', query),
         fetchSystem('siddha', query),
@@ -100,16 +130,11 @@ RULES:
       });
 
       // Handle AI Res
-      if (!aiResponse.ok) {
+      if (!aiResultObj.ok) {
         console.warn('AI Response not OK, falling back to db results.');
         setResult('Definition service unavailable at the moment. Please refer to the clinical database results below.');
       } else {
-        const data = await aiResponse.json();
-        if (data.candidates && data.candidates.length > 0) {
-          setResult(data.candidates[0].content.parts[0].text);
-        } else {
-          setResult('No specific AI summarization available for this query. Please check clinical references below.');
-        }
+        setResult(aiResultObj.data);
       }
 
     } catch (err) {
